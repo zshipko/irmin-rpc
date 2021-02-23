@@ -1,16 +1,30 @@
 open Cmdliner
 open Lwt.Infix
 
+module Conf = struct
+  let stable_hash = 32
+
+  let entries = 256
+end
+
 let () =
   Logs.set_level (Some Logs.App);
   Logs.set_reporter (Logs_fmt.reporter ())
 
-let http_callback _conn _req body =
+let http_callback (type x) (module Store : Irmin.S with type t = x) (store : x)
+    _conn _req body =
+  let repo = Store.repo store in
   Cohttp_lwt.Body.drain_body body >>= fun () ->
-  Cohttp_lwt_unix.Server.respond_not_found ()
+  let body = Irmin.Type.to_string (Store.Status.t repo) (Store.status store) in
+  Cohttp_lwt_unix.Server.respond_string ~body ~status:`OK ()
 
-let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
-    address_file insecure max_tx =
+let run root host port secret_key address_file insecure max_tx =
+  let module Store =
+    Irmin_pack_layered.Make (Conf) (Irmin.Metadata.None) (Irmin.Contents.String)
+      (Irmin.Path.String_list)
+      (Irmin.Branch.String)
+      (Irmin.Hash.BLAKE2B)
+  in
   let module Rpc =
     Irmin_rpc_unix.Make
       (Store)
@@ -21,12 +35,14 @@ let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
     match secret_key with Some key -> `File key | None -> `Ephemeral
   in
   let secure = not insecure in
-  let http = Cohttp_lwt_unix.Server.make ~callback:http_callback () in
+  let conf = Irmin_pack.config root in
+  let config =
+    Irmin_pack_layered.config ~conf ~copy_in_upper:true ~with_lower:true ()
+  in
   let p =
-    store >>= fun store ->
-    Rpc.Server.serve ?max_tx ~secure ~secret_key
-      (`TCP (host, port))
-      (Store.repo store)
+    Store.Repo.v config >>= fun repo ->
+    Store.master repo >>= fun store ->
+    Rpc.Server.serve ?max_tx ~secure ~secret_key (`TCP (host, port)) repo
     >>= fun server ->
     let () =
       match address_file with
@@ -37,9 +53,14 @@ let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
       | None ->
           Logs.app (fun l -> l "%s" (Uri.to_string (Rpc.Server.uri server)))
     in
+
+    let http =
+      Cohttp_lwt_unix.Server.make
+        ~callback:(http_callback (module Store) store)
+        ()
+    in
     Cohttp_lwt_unix.Server.create ~mode:(`TCP (`Port (port + 1))) http
   in
-
   Lwt_main.run p
 
 let host =
@@ -73,10 +94,15 @@ let max_tx =
   let doc = "Maximum number of open transactions per client" in
   Arg.(value & opt (some int) None & info [ "x"; "max-tx" ] ~docv:"MAX" ~doc)
 
+let root =
+  let doc = "Root directory for Irmin store" in
+  Arg.(
+    value & opt string "/tmp/irmin-rpc" & info [ "r"; "root" ] ~docv:"PATH" ~doc)
+
 let main_t =
   Term.(
     const run
-    $ Irmin_unix.Resolver.store
+    $ root
     $ host
     $ port
     $ secret_key

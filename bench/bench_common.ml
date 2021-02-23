@@ -29,6 +29,12 @@ let reset_stats () =
   Index.Stats.reset_stats ();
   Irmin_pack.Stats.reset_stats ()
 
+module Conf = struct
+  let stable_hash = 32
+
+  let entries = 256
+end
+
 let random_char () = char_of_int (1 + Random.int 255)
 
 let random_string n = String.init n (fun _i -> random_char ())
@@ -42,12 +48,6 @@ let with_timer f =
   let+ a = f () in
   let t1 = Sys.time () -. t0 in
   (t1, a)
-
-module Conf = struct
-  let entries = 32
-
-  let stable_hash = 256
-end
 
 let info () =
   let date = Int64.of_float (Unix.gettimeofday ()) in
