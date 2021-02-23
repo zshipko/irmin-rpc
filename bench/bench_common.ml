@@ -30,9 +30,9 @@ let reset_stats () =
   Irmin_pack.Stats.reset_stats ()
 
 module Conf = struct
-  let stable_hash = 32
+  let stable_hash = 256
 
-  let entries = 256
+  let entries = 32
 end
 
 let random_char () = char_of_int (1 + Random.int 255)

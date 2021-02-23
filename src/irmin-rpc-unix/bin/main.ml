@@ -2,9 +2,9 @@ open Cmdliner
 open Lwt.Infix
 
 module Conf = struct
-  let stable_hash = 32
+  let stable_hash = 256
 
-  let entries = 256
+  let entries = 32
 end
 
 let () =
