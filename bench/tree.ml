@@ -286,7 +286,7 @@ let suite : suite_elt list =
       };*)
     {
       mode = `Large;
-      speed = `Slow;
+      speed = `Quick;
       inode_config = `Entries_32;
       run = Bench_inodes_32.run ~mode:`Large;
     };
@@ -343,13 +343,13 @@ let main ncommits ncommits_trace operations_file quick depth width nchain_trees
   Printexc.record_backtrace true;
   Random.self_init ();
   FSHelper.rm_dir config.root;
-  (*let suite =
-      (* The suite contains two `Read_trace benchmarks. To prevent running both of
-         them when `Quick is not set, we remove the first one (which is the head
-         of the suite as well). *)
-      if config.quick then List.filter (fun b -> b.speed = `Quick) suite
-      else List.tl suite
-    in*)
+  let suite =
+    (* The suite contains two `Read_trace benchmarks. To prevent running both of
+       them when `Quick is not set, we remove the first one (which is the head
+       of the suite as well). *)
+    if config.quick then List.filter (fun b -> b.speed = `Quick) suite
+    else List.tl suite
+  in
   let run_benchmarks () =
     Lwt_list.fold_left_s
       (fun (config, results) (b : suite_elt) ->

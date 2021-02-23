@@ -11,16 +11,24 @@ let () =
   Logs.set_level (Some Logs.App);
   Logs.set_reporter (Logs_fmt.reporter ())
 
-let http_callback (type x) (module Store : Irmin.S with type t = x) (store : x)
-    _conn _req body =
+let contents_of_string s : (module Irmin.Contents.S) =
+  match String.lowercase_ascii s with
+  | "string" -> (module Irmin.Contents.String)
+  | "json" -> (module Irmin.Contents.Json)
+  | "json-value" -> (module Irmin.Contents.Json_value)
+  | s -> invalid_arg (s ^ " is not a known content type")
+
+let http_callback (type x) (module Store : Irmin_pack_layered.S with type t = x)
+    (store : x) _conn _req body =
   let repo = Store.repo store in
   Cohttp_lwt.Body.drain_body body >>= fun () ->
   let body = Irmin.Type.to_string (Store.Status.t repo) (Store.status store) in
   Cohttp_lwt_unix.Server.respond_string ~body ~status:`OK ()
 
-let run root host port secret_key address_file insecure max_tx =
+let run contents root branch host port secret_key address_file insecure max_tx =
+  let (module Contents) = contents_of_string contents in
   let module Store =
-    Irmin_pack_layered.Make (Conf) (Irmin.Metadata.None) (Irmin.Contents.String)
+    Irmin_pack_layered.Make (Conf) (Irmin.Metadata.None) (Contents)
       (Irmin.Path.String_list)
       (Irmin.Branch.String)
       (Irmin.Hash.BLAKE2B)
@@ -41,7 +49,7 @@ let run root host port secret_key address_file insecure max_tx =
   in
   let p =
     Store.Repo.v config >>= fun repo ->
-    Store.master repo >>= fun store ->
+    Store.of_branch repo branch >>= fun store ->
     Rpc.Server.serve ?max_tx ~secure ~secret_key (`TCP (host, port)) repo
     >>= fun server ->
     let () =
@@ -99,10 +107,23 @@ let root =
   Arg.(
     value & opt string "/tmp/irmin-rpc" & info [ "r"; "root" ] ~docv:"PATH" ~doc)
 
+let branch =
+  let doc = "Branch name" in
+  Arg.(
+    value
+    & opt string Irmin.Branch.String.master
+    & info [ "b"; "branch" ] ~docv:"NAME" ~doc)
+
+let contents =
+  let doc = "Content type: string, json, json-value" in
+  Arg.(value & opt string "string" & info [ "c"; "contents" ] ~docv:"KIND" ~doc)
+
 let main_t =
   Term.(
     const run
+    $ contents
     $ root
+    $ branch
     $ host
     $ port
     $ secret_key
