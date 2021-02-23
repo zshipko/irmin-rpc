@@ -5,9 +5,9 @@ let () =
   Logs.set_level (Some Logs.App);
   Logs.set_reporter (Logs_fmt.reporter ())
 
-let config path =
-  let head = Git.Reference.of_string "refs/heads/master" |> Result.get_ok in
-  Irmin_git.config ~head path
+let http_callback _conn _req body =
+  Cohttp_lwt.Body.drain_body body >>= fun () ->
+  Cohttp_lwt_unix.Server.respond_not_found ()
 
 let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
     address_file insecure max_tx =
@@ -21,6 +21,7 @@ let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
     match secret_key with Some key -> `File key | None -> `Ephemeral
   in
   let secure = not insecure in
+  let http = Cohttp_lwt_unix.Server.make ~callback:http_callback () in
   let p =
     store >>= fun store ->
     Rpc.Server.serve ?max_tx ~secure ~secret_key
@@ -36,8 +37,9 @@ let run (Irmin_unix.Resolver.S ((module Store), store, _)) host port secret_key
       | None ->
           Logs.app (fun l -> l "%s" (Uri.to_string (Rpc.Server.uri server)))
     in
-    fst (Lwt.wait ())
+    Cohttp_lwt_unix.Server.create ~mode:(`TCP (`Port (port + 1))) http
   in
+
   Lwt_main.run p
 
 let host =
